@@ -3,18 +3,40 @@ import java.io.{FileNotFoundException, IOException, InputStream, OutputStream}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
-import java.nio.file.{AtomicMoveNotSupportedException, FileAlreadyExistsException, FileVisitOption, Files, Path, StandardCopyOption, StandardOpenOption}
+import java.nio.file.{AtomicMoveNotSupportedException, FileAlreadyExistsException, FileVisitor, FileVisitOption, FileVisitResult, Files, Path, StandardCopyOption, StandardOpenOption}
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicBoolean
-
 import fs2.Chunk
 import polynote.kernel.BaseEnv
 import zio.blocking.{Blocking, effectBlocking}
 import zio.interop.catz._
 import zio.{RIO, Semaphore, Task, ZIO}
 import zio.ZIO.effect
+import java.util.{Arrays, HashSet}
 
 import scala.collection.JavaConverters._
 import LocalFilesystem.FileChannelWALWriter
+
+
+class LocalFileSystemVisitor extends FileVisitor[Path] {
+
+  @throws[IOException]
+  override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = FileVisitResult.CONTINUE
+
+  @throws[IOException]
+  override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = { //This is where I need my logic
+    FileVisitResult.CONTINUE
+  }
+
+  @throws[IOException]
+  override def visitFileFailed(file: Path, exc: IOException): FileVisitResult = { // This is important to note. Test this behaviour
+    FileVisitResult.CONTINUE
+  }
+
+  @throws[IOException]
+  override def postVisitDirectory(dir: Path, exc: IOException) = FileVisitResult.CONTINUE
+
+}
 
 class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
 
@@ -76,7 +98,7 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
   override def createLog(path: Path): RIO[BaseEnv, WAL.WALWriter] =
     effectBlocking(path.getParent.toFile.mkdirs()) *> FileChannelWALWriter(path)
 
-  private def readBytes(is: => InputStream): RIO[BaseEnv, Chunk.Bytes] = {
+  private def readBytes(is: => InputStream) = {
     for {
       env    <- ZIO.environment[BaseEnv]
       ec      = env.get[Blocking.Service].blockingExecutor.asEC
@@ -84,8 +106,11 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
     } yield chunks
   }
 
+//  override def list(path: Path): RIO[BaseEnv, List[Path]] =
+//    effectBlocking(Files.walk(path, maxDepth, FileVisitOption.FOLLOW_LINKS).iterator().asScala.drop(1).toList)
+
   override def list(path: Path): RIO[BaseEnv, List[Path]] =
-    effectBlocking(Files.walk(path, maxDepth, FileVisitOption.FOLLOW_LINKS).iterator().asScala.drop(1).toList)
+    effectBlocking(Files.walkFileTree(path, new HashSet[FileVisitOption](Arrays.asList(FileVisitOption.FOLLOW_LINKS)), maxDepth, new LocalFileSystemVisitor()).iterator().asScala.drop(1).toList)
 
   override def validate(path: Path): RIO[BaseEnv, Unit] = {
     if (path.iterator().asScala.length > maxDepth) {
@@ -95,7 +120,7 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
 
   override def exists(path: Path): RIO[BaseEnv, Boolean] = effectBlocking(path.toFile.exists())
 
-  private def createDirs(path: Path): RIO[BaseEnv, Unit] = effectBlocking(Files.createDirectories(path.getParent))
+  private def createDirs(path: Path):RIO[BaseEnv, Unit] = effectBlocking(Files.createDirectories(path.getParent))
 
   override def move(from: Path, to: Path): RIO[BaseEnv, Unit] = createDirs(to).map(_ => Files.move(from, to))
 
@@ -103,7 +128,7 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
 
   override def delete(path: Path): RIO[BaseEnv, Unit] =
     exists(path).flatMap {
-      case false => ZIO.fail(new FileNotFoundException(s"File $path does't exist"))
+      case false => ZIO.fail(new FileNotFoundException(s"File $path doesn't exist"))
       case true  => effectBlocking(Files.delete(path))
     }
 
