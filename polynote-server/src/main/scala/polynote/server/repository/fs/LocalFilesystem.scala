@@ -98,7 +98,7 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
   override def createLog(path: Path): RIO[BaseEnv, WAL.WALWriter] =
     effectBlocking(path.getParent.toFile.mkdirs()) *> FileChannelWALWriter(path)
 
-  private def readBytes(is: => InputStream) = {
+  private def readBytes(is: => InputStream): RIO[BaseEnv, Chunk.Bytes] = {
     for {
       env    <- ZIO.environment[BaseEnv]
       ec      = env.get[Blocking.Service].blockingExecutor.asEC
@@ -120,7 +120,7 @@ class LocalFilesystem(maxDepth: Int = 4) extends NotebookFilesystem {
 
   override def exists(path: Path): RIO[BaseEnv, Boolean] = effectBlocking(path.toFile.exists())
 
-  private def createDirs(path: Path):RIO[BaseEnv, Unit] = effectBlocking(Files.createDirectories(path.getParent))
+  private def createDirs(path: Path): RIO[BaseEnv, Unit] = effectBlocking(Files.createDirectories(path.getParent))
 
   override def move(from: Path, to: Path): RIO[BaseEnv, Unit] = createDirs(to).map(_ => Files.move(from, to))
 
